@@ -852,6 +852,12 @@ app.include_router(setup_workspace_routes())
 from routes.hwfit_routes import setup_hwfit_routes
 app.include_router(setup_hwfit_routes())
 
+# Low-resource profile (detect the box's VRAM/RAM and clamp local models
+# to what it can actually hold). Read-only for users; the tier can be pinned
+# by an admin.
+from routes.lowgpu_routes import setup_lowgpu_routes
+app.include_router(setup_lowgpu_routes())
+
 # Model A/B Comparison
 from routes.compare.compare_routes import setup_compare_routes
 app.include_router(setup_compare_routes(session_manager))
@@ -1144,6 +1150,14 @@ async def _startup_event():
     global upload_cleanup_task
     logger.info("Application starting up...")
     webhook_manager.set_loop(asyncio.get_running_loop())
+    # Low-resource profile: probe the box's VRAM/RAM in the background so the
+    # request path can clamp local models to what the hardware can actually
+    # hold. Never blocks startup — until the probe lands, nothing is clamped.
+    try:
+        from src import low_resource
+        low_resource.warm_profile()
+    except Exception as e:
+        logger.debug(f"Low-resource warm-up skipped: {e}")
     # Wipe any leftover incognito sessions from previous process — they're
     # ephemeral by design and must not survive a restart.
     try:

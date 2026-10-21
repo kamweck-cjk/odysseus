@@ -294,12 +294,27 @@ def budget_context_for_model(endpoint_url: str, model: str, *, fallback: int = 0
     not pair this flag with a context length from a *different* lookup (a stale
     local re-query, or a caller that didn't pass one), which would budget off an
     unproven number (review on #4122). On probe error, returns ``fallback`` (the
-    caller's best-known value) to preserve prior behaviour."""
+    caller's best-known value) to preserve prior behaviour.
+
+    On a low-resource machine the window is additionally clamped to the tier
+    ceiling for LOCAL endpoints: a model server reports the context it was
+    *started* with, which may be far larger than the card can actually hold
+    alongside the weights. Remote endpoints are never clamped.
+    """
     try:
         ctx, known = get_context_length_known(endpoint_url, model)
-        return ctx if known else 0
     except Exception:
         return fallback
+    if not known:
+        return 0
+    try:
+        from src.low_resource import clamp_context_window
+
+        if is_local_endpoint(endpoint_url):
+            ctx = clamp_context_window(ctx, True)
+    except Exception:
+        pass
+    return ctx
 
 
 def _lookup_known(model: str) -> Optional[int]:

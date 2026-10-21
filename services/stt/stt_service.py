@@ -75,7 +75,11 @@ class STTService:
                 # "faster-whisper not installed" error.
                 try:
                     import torch
-                    use_cuda = torch.cuda.is_available()
+                    from src.low_resource import gpu_features_allowed
+
+                    # On a low-resource tier the STT model stays on the CPU so
+                    # it does not take VRAM away from the user's own model.
+                    use_cuda = torch.cuda.is_available() and gpu_features_allowed()
                 except Exception:
                     use_cuda = False
                 device = "cuda" if use_cuda else "cpu"

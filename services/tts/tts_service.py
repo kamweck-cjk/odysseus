@@ -295,6 +295,13 @@ class _KokoroPipeline:
             import torch
             from kokoro import KPipeline
 
+            from src.low_resource import gpu_features_allowed
+
+            if not gpu_features_allowed():
+                # Low-resource tier: keep the VRAM for the user's own model.
+                logger.warning("Low-resource profile active: GPU TTS disabled")
+                return
+
             if not torch.cuda.is_available():
                 logger.warning("CUDA not available for Kokoro TTS")
                 return

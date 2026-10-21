@@ -88,6 +88,41 @@ def _cpu_moe_for_budget(model, quant, kv_gb, vram_budget_gb, fixed_gb=None):
     return n, False
 
 
+def _low_resource_ctx_cap():
+    """Context ceiling for this machine, or None when it must not be capped.
+
+    The low-resource profile classifies the box by its detected VRAM/RAM. On a
+    small card the KV cache is the scarce resource — it grows linearly with
+    context and has to sit next to the weights — so the recommended serving
+    context has to be smaller than what the model could technically do.
+    """
+    try:
+        from src.low_resource import context_window_cap
+
+        return context_window_cap()
+    except Exception:
+        return None
+
+
+def _low_resource_cpu_only(system):
+    """True when this machine has no usable GPU, so nothing may be offloaded.
+
+    Reads the same ``system`` dict the rest of this module uses, so a manual
+    hardware override in the fit UI is honoured too. A box that reports a
+    display adapter but no GPU backend (the usual Windows "no CUDA" case)
+    still counts as CPU-only: asking llama.cpp to offload to a GPU that does
+    not exist just fails at launch.
+    """
+    if not isinstance(system, dict):
+        return False
+    backend = str(system.get("backend") or "").strip().lower()
+    if backend in ("cpu_x86", "cpu_arm", "cpu"):
+        return True
+    if "has_gpu" in system and not system.get("has_gpu"):
+        return True
+    return False
+
+
 def compute_serve_profiles(system, model, serve_weights_gb=None, serve_quant=None):
     """Return a list of profile dicts for llama.cpp serving of `model` on `system`.
 
@@ -191,12 +226,21 @@ def compute_serve_profiles(system, model, serve_weights_gb=None, serve_quant=Non
         # Shrink context if even the chosen KV won't fit alongside weights.
         # Start from the smaller of the profile's target and the model's limit.
         cur_ctx = min(ctx, model_ctx_max)
+        # On a low-resource machine, cap the recommendation at what the box can
+        # actually hold. A model may be able to run 128K context in theory, but
+        # the KV cache for that alone does not fit next to the weights.
+        tier_ctx_cap = _low_resource_ctx_cap()
+        if tier_ctx_cap:
+            cur_ctx = min(cur_ctx, tier_ctx_cap)
         # Floor the context-shrink loop at 8192, but never above the model's own
         # trained limit. A model with a sub-8192 context (e.g. a 2048-token
         # SmolLM) starts below 8192, so a hard-coded 8192 guard skipped the loop
         # entirely and produced NO profile — the serve UI then fell back to
         # manual flags even though the model fits the GPU trivially.
-        ctx_floor = min(8192, model_ctx_max)
+        # `cur_ctx` joins the floor so a tier cap below the floor still yields
+        # one profile instead of none.
+        ctx_floor = min(8192, model_ctx_max, cur_ctx)
+        cpu_only = _low_resource_cpu_only(system)
         while cur_ctx >= ctx_floor:
             kv = _kv_gb(model, cur_ctx, kv_type)
             n_cpu_moe, fits = _cpu_moe_for_budget(model, quant, kv, budget, fixed_gb=serve_weights_gb)
@@ -207,7 +251,10 @@ def compute_serve_profiles(system, model, serve_weights_gb=None, serve_quant=Non
                     "key": key,
                     "label": label,
                     "quant": quant,
-                    "n_gpu_layers": 999,
+                    # 999 means "offload as much as fits". With no usable GPU
+                    # there is nothing to offload to, so keep every layer on the
+                    # CPU instead of asking for a GPU offload that cannot run.
+                    "n_gpu_layers": 0 if cpu_only else 999,
                     "n_cpu_moe": n_cpu_moe,
                     "cache_type": kv_type,
                     "ctx": cur_ctx,

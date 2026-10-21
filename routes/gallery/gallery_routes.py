@@ -72,10 +72,15 @@ def _load_sam_backend():
 
     device = "cpu"
     try:
-        if torch.cuda.is_available():
-            device = "cuda"
-        elif getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
-            device = "mps"
+        # On a low-resource box the optional GPU features stay on the CPU so
+        # they do not take VRAM away from the user's own model server.
+        from src.low_resource import gpu_features_allowed
+
+        if gpu_features_allowed():
+            if torch.cuda.is_available():
+                device = "cuda"
+            elif getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+                device = "mps"
     except Exception:
         device = "cpu"
 
@@ -108,10 +113,15 @@ def _load_grounding_backend():
 
     device = "cpu"
     try:
-        if torch.cuda.is_available():
-            device = "cuda"
-        elif getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
-            device = "mps"
+        # On a low-resource box the optional GPU features stay on the CPU so
+        # they do not take VRAM away from the user's own model server.
+        from src.low_resource import gpu_features_allowed
+
+        if gpu_features_allowed():
+            if torch.cuda.is_available():
+                device = "cuda"
+            elif getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+                device = "mps"
     except Exception:
         device = "cpu"
 

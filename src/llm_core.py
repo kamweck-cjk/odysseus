@@ -1298,6 +1298,33 @@ def _apply_local_generation_stability(payload: Dict, url: str, model: str) -> No
         payload["max_tokens"] = 2048
 
 
+def _apply_low_resource_profile(payload: Dict, url: str, model: str) -> None:
+    """Clamp a local model's request to what this machine can actually hold.
+
+    The low-resource profile is derived from the detected VRAM/RAM of the box
+    Odysseus is running on. A model server on the same machine has to fit
+    its KV cache in that VRAM, so asking for a 32K output budget on a 4 GB
+    card is an out-of-memory error waiting to happen — the server reserves the
+    context, not just the tokens it ends up generating.
+
+    Only LOCAL endpoints are clamped. A hosted API runs on someone else's
+    hardware, so shrinking its budget would cost quality for nothing.
+
+    This is a sibling of ``_apply_local_generation_stability`` and is called
+    from the same three places (sync / async / streaming), so every outbound
+    chat request passes through it exactly once.
+    """
+    if not is_local_endpoint(url):
+        return
+    try:
+        from src.low_resource import clamp_payload_max_tokens
+
+        clamp_payload_max_tokens(payload, True)
+    except Exception:
+        # Never let an optimisation break a request.
+        logger.debug("Low-resource payload clamp skipped", exc_info=True)
+
+
 def _provider_headers(provider: str, headers: Optional[Dict] = None) -> Dict[str, str]:
     h = {"Content-Type": "application/json"}
     if isinstance(headers, dict):
@@ -2351,6 +2378,7 @@ def llm_call(url: str, model: str, messages: List[Dict], temperature: float = LL
             tok_key = "max_completion_tokens" if _uses_max_completion_tokens(model) else "max_tokens"
             payload[tok_key] = max_tokens
         _apply_local_generation_stability(payload, target_url, model)
+        _apply_low_resource_profile(payload, target_url, model)
         _apply_local_qwen_thinking_mode(payload, target_url, model, thinking_mode)
         _apply_hosted_thinking_mode(payload, provider, model, thinking_mode)
         _apply_deepseek_v4_reasoning_defaults(
@@ -2767,6 +2795,7 @@ async def llm_call_async(
             payload["reasoning_effort"] = _MISTRAL_REASONING_EFFORT
         _apply_local_cache_affinity(payload, url, session_id)
         _apply_local_generation_stability(payload, target_url, model)
+        _apply_low_resource_profile(payload, target_url, model)
         _apply_local_qwen_thinking_mode(payload, target_url, model, thinking_mode)
         _apply_hosted_thinking_mode(payload, provider, model, thinking_mode)
         _apply_deepseek_v4_reasoning_defaults(
@@ -3044,6 +3073,7 @@ async def _stream_llm_inner(url: str, model: str, messages: List[Dict], temperat
             payload["think"] = False
         _apply_local_cache_affinity(payload, url, session_id)
         _apply_local_generation_stability(payload, target_url, model)
+        _apply_low_resource_profile(payload, target_url, model)
         _apply_local_qwen_thinking_mode(payload, target_url, model, thinking_mode)
         _apply_hosted_thinking_mode(payload, provider, model, thinking_mode)
         _apply_deepseek_v4_reasoning_defaults(
