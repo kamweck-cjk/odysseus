@@ -145,14 +145,25 @@ def _read_stored_tier() -> Optional[str]:
 
 
 def _write_stored_tier(tier: Optional[str]) -> None:
-    """Persist (or clear) the tier override."""
+    """Persist (or clear) the tier override.
+
+    Clearing removes the file outright rather than leaving an empty stub
+    behind, so "no override" and "never configured" look the same on disk.
+    """
     path = _profile_file()
-    payload = {"tier": tier} if tier else {}
+    if not tier:
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            logger.warning("Could not clear low-resource tier: %s", exc)
+        return
     try:
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         from core.atomic_io import atomic_write_json
 
-        atomic_write_json(path, payload, indent=2)
+        atomic_write_json(path, {"tier": tier}, indent=2)
     except Exception as exc:
         logger.warning("Could not persist low-resource tier: %s", exc)
 
