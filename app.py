@@ -753,6 +753,13 @@ app.include_router(setup_chat_routes(
 from routes.research.research_routes import setup_research_routes
 app.include_router(setup_research_routes(research_handler, session_manager=session_manager))
 
+# Sarge (research-backed campaign planning and step execution)
+from routes.sarge.sarge_routes import setup_sarge_routes
+from src.sarge.service import get_service as get_sarge_service
+sarge_service = get_sarge_service()
+app.state.sarge_service = sarge_service
+app.include_router(setup_sarge_routes(sarge_service))
+
 # History
 from routes.history.history_routes import setup_history_routes
 app.include_router(setup_history_routes(session_manager, upload_handler=upload_handler))
@@ -1150,6 +1157,15 @@ async def _startup_event():
     global upload_cleanup_task
     logger.info("Application starting up...")
     webhook_manager.set_loop(asyncio.get_running_loop())
+    # Sarge campaigns are deliberately not auto-resumed after a crash/restart.
+    # Mark interrupted runs blocked so the owner can inspect the field log and
+    # resume explicitly.
+    try:
+        recovered = sarge_service.recover()
+        if recovered:
+            logger.info("Recovered %s interrupted Sarge campaign(s)", recovered)
+    except Exception as e:
+        logger.warning("Sarge recovery skipped: %s", e)
     # Low-resource profile: probe the box's VRAM/RAM in the background so the
     # request path can clamp local models to what the hardware can actually
     # hold. Never blocks startup — until the probe lands, nothing is clamped.
@@ -1426,6 +1442,11 @@ async def _shutdown_event():
             await upload_cleanup_task
         except asyncio.CancelledError:
             pass
+    # Stop Sarge campaign runners before the task scheduler and agent services.
+    try:
+        await sarge_service.shutdown()
+    except Exception as e:
+        logger.warning("Sarge shutdown error: %s", e)
     # Stop task scheduler (no-op if it never started under the gate)
     try:
         await task_scheduler.stop()

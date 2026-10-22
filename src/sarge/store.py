@@ -212,6 +212,22 @@ class SargeStore:
             atomic_write_json(str(self._meta_path(campaign_id)), campaign, indent=2)
             return campaign
 
+    def iter_all(self):
+        """Yield raw campaign records. Used only for startup recovery."""
+        try:
+            entries = list(self.root.iterdir())
+        except OSError:
+            return
+        for entry in entries:
+            if not entry.is_dir() or not CAMPAIGN_ID_RE.fullmatch(entry.name):
+                continue
+            try:
+                data = json.loads((entry / _META_FILE).read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if isinstance(data, dict):
+                yield data
+
     def list(self, owner: str, limit: int = 200) -> list[dict]:
         items: list[dict] = []
         try:
