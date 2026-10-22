@@ -257,6 +257,19 @@ def _get_context_length_cached(endpoint_url: str, model: str) -> Tuple[int, bool
         return _context_cache[cache_key]
 
     ctx, known = _query_context_length(endpoint_url, model)
+    # A local server reports the window it was *started* with, which can be far
+    # larger than this machine can hold alongside the weights — Ollama then
+    # allocates that whole window as KV cache. Cap the usable window to the
+    # low-resource tier ceiling so num_ctx, context compaction and the output
+    # budget maths all agree on what actually fits. Remote endpoints are never
+    # clamped: their window costs us nothing.
+    if is_local:
+        try:
+            from src.low_resource import clamp_context_window
+
+            ctx = clamp_context_window(ctx, True)
+        except Exception:
+            logger.debug("Low-resource context clamp skipped", exc_info=True)
     # Only cache non-default values to allow retry on next request.
     # Local endpoints can restart with a different --max-model-len while keeping
     # the same model id, so always re-query them instead of serving stale cache.

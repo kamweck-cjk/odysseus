@@ -258,6 +258,50 @@ def test_compute_serve_profiles_still_returns_profiles_on_a_capped_box(monkeypat
     assert all(p["ctx"] <= 2048 for p in profiles)
 
 
+# ---------------------------------------------------------------------------
+# Context-window integration
+# ---------------------------------------------------------------------------
+
+def test_local_window_is_capped_before_becoming_num_ctx(low_resource, monkeypatch):
+    """Ollama reserves ``options.num_ctx`` as KV cache. A model advertising a
+    128K window must not make an 8 GB card reserve 128K of it."""
+    from src import model_context
+
+    monkeypatch.setattr(low_resource, "_profile", {
+        "tier": "medium",
+        "source": "detected",
+        "ready": True,
+        "limits": dict(low_resource._TIER_LIMITS["medium"]),
+        "hardware": {},
+    })
+    monkeypatch.setattr(model_context, "_query_context_length",
+                        lambda url, model: (131_072, True))
+
+    url = "http://127.0.0.1:11434/v1/chat/completions"
+    assert model_context.get_context_length(url, "qwen3.5-4b") == \
+        low_resource._TIER_LIMITS["medium"]["context_window_cap"]
+
+
+def test_remote_window_survives_the_cap(low_resource, monkeypatch):
+    """A hosted model's window costs this machine nothing — do not shrink it."""
+    from src import model_context
+
+    model_context._context_cache.clear()
+    monkeypatch.setattr(low_resource, "_profile", {
+        "tier": "minimal",
+        "source": "detected",
+        "ready": True,
+        "limits": dict(low_resource._TIER_LIMITS["minimal"]),
+        "hardware": {},
+    })
+    monkeypatch.setattr(model_context, "_query_context_length",
+                        lambda url, model: (200_000, True))
+
+    assert model_context.get_context_length(
+        "https://api.openai.com/v1/chat/completions", "gpt-5"
+    ) == 200_000
+
+
 def test_compute_serve_profiles_offloads_nothing_without_a_gpu(monkeypatch):
     """`n_gpu_layers: 999` asks for a GPU offload; a CPU-only box cannot run it.
 
