@@ -1246,11 +1246,13 @@ function _buildJobCard(job) {
     const thumbnail = thumbUrl
       ? `<span class="research-job-thumb-frame"><img class="research-job-thumb" src="${_esc(thumbUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer"></span>`
       : '<span class="research-job-thumb-frame research-job-thumb-empty" aria-hidden="true"></span>';
+const _sargeBadgeIcon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>';
     card.innerHTML = `
       <div class="research-job-header">
         <span class="research-job-query">${_esc(job.query)}</span>${doneBadge}
         <button type="button" class="task-status-badge task-state-badge research-job-report-badge" data-action="report" title="Open visual report">${_externalIcon}<span class="task-state-label">Visual</span></button>
         <button type="button" class="task-status-badge task-state-badge research-job-discuss-badge" data-action="chat" title="Open follow-up chat with this research as context">${_chatIcon}<span class="task-state-label">Chat</span></button>
+        <button type="button" class="task-status-badge task-state-badge research-job-sarge-badge" data-action="sarge" title="Turn into Sarge campaign">${_sargeBadgeIcon}<span class="task-state-label">Sarge</span></button>
         ${_jobOverflowHTML([
           { action: 'copy', icon: _copyIcon, label: 'Copy report' },
           { action: 'dismiss', icon: _cancelIcon, label: 'Hide from list' },

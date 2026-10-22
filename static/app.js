@@ -56,6 +56,7 @@ import groupModule from './js/group.js';
 import * as researchPanelModule from './js/research/panel.js?v=20260913researchrailerrors1';
 import ttsModule from './js/tts-ai.js';
 import spinnerModule from './js/spinner.js';
+import * as sargeModule from './js/sarge/index.js';
 import { initKeyboardShortcuts } from './js/keyboard-shortcuts.js?v=20260829chatstyle12';
 import { getSettings } from './js/appConfig.js';
 import { initSidebarLayout, syncRailSide } from './js/sidebar-layout.js?v=20260910sidebarbounce1';
@@ -179,7 +180,8 @@ function initRailHoverLabels() {
     'rail-calendar': 'Calendar',
     'rail-compare': 'Compare',
     'rail-cookbook': 'Cookbook',
-    'rail-research': 'Research',
+    'rail-research': 'Deep Research',
+    'rail-sarge': 'Sarge',
     'rail-email': 'Email',
     'rail-gallery': 'Gallery',
     'rail-archive': 'Library',
@@ -1031,6 +1033,14 @@ function initializeEventListeners() {
   if (toolResearchBtn) {
     toolResearchBtn.addEventListener('click', () => {
       researchPanelModule.toggle();
+    });
+  }
+
+  // Sidebar tool buttons
+  const toolSargeBtn = el('tool-sarge-btn');
+  if (toolSargeBtn) {
+    toolSargeBtn.addEventListener('click', () => {
+      if (sargeModule?.toggle) sargeModule.toggle();
     });
   }
 
@@ -3806,6 +3816,9 @@ function startOdysseusApp() {
     compareModule.init(API_BASE);
   }
   researchPanelModule.init(API_BASE, markdownModule, sessionModule);
+  if (sargeModule?.init) {
+    try { sargeModule.init(API_BASE, markdownModule); } catch (e) { console.warn('sarge init failed', e); }
+  }
   // Initialize document editor module
   if (documentModule) {
     documentModule.init(API_BASE);
@@ -3834,6 +3847,7 @@ function startOdysseusApp() {
     'rail-compare':   'tool-compare-btn',
     'rail-cookbook':   'tool-cookbook-btn',
     'rail-research':  'tool-research-btn',
+    'rail-sarge':     'tool-sarge-btn',
     'rail-gallery':   'tool-gallery-btn',
     'rail-archive':   'tool-library-btn',
     'rail-memory':    'tool-memory-btn',
