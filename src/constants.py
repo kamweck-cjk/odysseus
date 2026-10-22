@@ -92,6 +92,9 @@ BG_JOBS_DIR = os.path.join(DATA_DIR, "bg_jobs")
 PROCESS_RESOURCES_DIR = os.path.join(DATA_DIR, "process_resources")
 BROWSER_RESOURCES_DIR = os.path.join(DATA_DIR, "browser_resources")
 DEEP_RESEARCH_DIR = os.path.join(DATA_DIR, "deep_research")
+# Sarge campaign metadata/event logs. Campaign agent workspaces live under
+# AGENT_WORKSPACE_DIR below so the shell/file tools are allowed to read them.
+SARGE_DIR = os.path.join(DATA_DIR, "sarge")
 MCP_OAUTH_DIR = os.path.join(DATA_DIR, "mcp_oauth")
 GENERATED_IMAGES_DIR = os.path.join(DATA_DIR, "generated_images")
 TTS_CACHE_DIR = os.path.join(DATA_DIR, "tts_cache")
@@ -105,6 +108,9 @@ MEMORY_VECTORS_DIR = os.path.join(DATA_DIR, "memory_vectors")
 # Everything else under DATA_DIR is application state (session store, auth
 # database, encryption key, settings), and the agent has no business reading it.
 AGENT_WORKSPACE_DIR = os.path.join(DATA_DIR, "agent_workspace")
+# Sarge campaign execution workspaces. Kept inside AGENT_WORKSPACE_DIR because
+# the agent file/shell tools only accept data-root writes below that directory.
+SARGE_WORKSPACE_ROOT = os.path.join(AGENT_WORKSPACE_DIR, "sarge")
 
 # Paths with an intentional dedicated env override, defaulting under DATA_DIR.
 MAIL_ATTACHMENTS_DIR = os.getenv("ODYSSEUS_MAIL_ATTACHMENTS_DIR", os.path.join(DATA_DIR, "mail-attachments"))

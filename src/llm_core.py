@@ -638,6 +638,8 @@ def _set_cached_response(
     actual_model: Optional[str] = None,
 ) -> None:
     """Store response in cache."""
+    if not cache_key:
+        return
     if len(_response_cache) > 128:
         keys_to_remove = list(_response_cache.keys())[:64]
         for key in keys_to_remove:
@@ -1131,7 +1133,12 @@ def _is_self_hosted_openai_compatible(url: str) -> bool:
     return is_local_endpoint(url)
 
 
-def _apply_local_cache_affinity(payload: Dict, url: str, session_id: Optional[str]) -> None:
+def _apply_local_cache_affinity(
+    payload: Dict,
+    url: str,
+    session_id: Optional[str],
+    cache_prompt: Optional[bool] = None,
+) -> None:
     """Add llama.cpp-server slot-affinity hints to an outgoing payload, in place.
 
     As diagnosed in issue #2927, llama.cpp assigns requests to processing
@@ -1147,12 +1154,14 @@ def _apply_local_cache_affinity(payload: Dict, url: str, session_id: Optional[st
     api.openai.com or other cloud providers, which reject unrecognized
     top-level request fields).
     """
-    if not session_id:
-        return
     if not _is_self_hosted_openai_compatible(url):
         return
-    payload.setdefault("session_id", str(session_id))
-    payload.setdefault("cache_prompt", True)
+    if session_id:
+        payload.setdefault("session_id", str(session_id))
+    if cache_prompt is not None:
+        payload["cache_prompt"] = bool(cache_prompt)
+    elif session_id:
+        payload.setdefault("cache_prompt", True)
 
 
 def _is_local_minimax_mlx_request(url: str, model: str) -> bool:
@@ -2644,8 +2653,15 @@ async def llm_call_async(
     return_model_metadata: bool = False,
     thinking_mode: Optional[str] = None,
     reasoning_effort: Optional[str] = None,
+    bypass_cache: bool = False,
+    cache_prompt: Optional[bool] = None,
 ) -> str | tuple[str, str]:
-    """Asynchronous LLM call using httpx with connection pooling, timeout, retry logic, and performance logging."""
+    """Asynchronous LLM call using httpx with connection pooling, timeout, retry logic, and performance logging.
+
+    ``bypass_cache`` skips both the in-process response cache read and write.
+    ``cache_prompt`` overrides the llama.cpp/LM Studio prompt-cache hint for
+    this call (``None`` keeps the historical session-affinity behavior).
+    """
     provider = _detect_provider(url)
     messages_copy = _sanitize_llm_messages(messages)
 
@@ -2680,16 +2696,17 @@ async def llm_call_async(
             # path when endpoint metadata is unavailable.
             pass
 
-    cache_key = _get_cache_key(
+    cache_key = "" if bypass_cache else _get_cache_key(
         url, model, messages_copy, temperature, max_tokens, headers=headers,
         thinking_mode=thinking_mode, reasoning_effort=reasoning_effort,
     )
-    cached_response = _get_cached_response(cache_key)
-    if cached_response:
-        logger.debug(f"Returning cached response for key: {cache_key}")
-        if return_model_metadata:
-            return cached_response, (_get_cached_response_model(cache_key) or model)
-        return cached_response
+    if cache_key:
+        cached_response = _get_cached_response(cache_key)
+        if cached_response:
+            logger.debug(f"Returning cached response for key: {cache_key}")
+            if return_model_metadata:
+                return cached_response, (_get_cached_response_model(cache_key) or model)
+            return cached_response
 
     if provider == "chatgpt-subscription":
         # ChatGPT/Codex requires streamed Responses requests even for callers
@@ -2793,7 +2810,7 @@ async def llm_call_async(
             payload["think"] = False
         if provider == "mistral" and _supports_thinking(model):
             payload["reasoning_effort"] = _MISTRAL_REASONING_EFFORT
-        _apply_local_cache_affinity(payload, url, session_id)
+        _apply_local_cache_affinity(payload, url, session_id, cache_prompt=cache_prompt)
         _apply_local_generation_stability(payload, target_url, model)
         _apply_low_resource_profile(payload, target_url, model)
         _apply_local_qwen_thinking_mode(payload, target_url, model, thinking_mode)
