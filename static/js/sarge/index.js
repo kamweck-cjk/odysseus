@@ -724,10 +724,16 @@ async function _runAction(action) {
 
 // Re-render artifacts after detail render (it is loaded async).
 const _origRenderDetail = _renderDetail;
-_renderDetail = function patchedRenderDetail() {
-  _origRenderDetail();
+function _patchedRenderDetail() {
+  _origRenderDetail.call(null);
   if (_selectedId && _detail?.plan) _renderArtifacts(_selectedId);
-};
+}
+function _renderDetailBound() {
+  return _patchedRenderDetail();
+}
+// Note: call sites use _renderDetail() - redefine in a way that preserves
+// binding.
+_renderDetail = _patchedRenderDetail;
 
 // ------------------------------------------------------------------
 // Icons
