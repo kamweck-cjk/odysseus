@@ -6,9 +6,17 @@ servers we use the documented admin endpoints where they exist:
 * vLLM: ``POST /reset_prefix_cache``
 * llama.cpp server: ``GET /slots`` then ``POST /slots/{id}?action=erase``
 
-Ollama, LM Studio, and hosted APIs have no portable reset endpoint. Sarge still
-isolates those calls with a fresh session id and a fresh message context.
-Reset requests are deliberately short and failures never stop a campaign.
+Ollama, LM Studio, and hosted APIs have no portable reset endpoint. That is the
+common case (LM Studio is the default local runtime for many operators), so
+Sarge never relies on a reset succeeding. Instead the guaranteed isolation is
+per-request: every step gets a brand-new ``session_id``, a fresh message
+context, and ``cache_prompt: false`` on the OpenAI-compatible payload, which
+LM Studio and other llama.cpp-derived servers honour.
+
+Successful probes are remembered and failed probes are negative-cached per
+origin, so an LM Studio server costs at most one short probing round on the
+first step and zero requests afterwards. Reset requests are deliberately short
+and failures never stop a campaign.
 """
 
 from __future__ import annotations
@@ -24,6 +32,10 @@ logger = logging.getLogger(__name__)
 
 _TIMEOUT = 2.0
 _support_cache: dict[str, dict[str, bool]] = {}
+# Origins we have positively identified as LM Studio. LM Studio's server is
+# llama.cpp-derived but does NOT expose /slots or /reset_prefix_cache, so once
+# identified we skip probing entirely and return immediately.
+_lmstudio_origins: set[str] = set()
 
 
 def _origin(url: str) -> str:
@@ -34,6 +46,44 @@ def _origin(url: str) -> str:
     except Exception:
         pass
     return ""
+
+
+async def _probe_provider(client: httpx.AsyncClient, root: str) -> Optional[str]:
+    """Identify the local server software using the same fingerprints as
+    ``src/model_discovery.py`` so Sarge and the model scanner agree.
+
+    * LM Studio: ``GET /api/v1/models`` with ``models[0]`` carrying ``key`` and
+      ``architecture``. LM Studio's OpenAI-compatible ``/v1`` surface looks
+      identical to vLLM/llama.cpp, so the native endpoint is required.
+    * llama.cpp (llama-server): ``GET /props`` describing slots/chat template.
+    """
+    try:
+        response = await client.get(f"{root}/api/v1/models", timeout=_TIMEOUT)
+        if response.status_code == 200:
+            models = (response.json() or {}).get("models")
+            if (
+                isinstance(models, list)
+                and models
+                and isinstance(models[0], dict)
+                and "key" in models[0]
+                and "architecture" in models[0]
+            ):
+                return "lmstudio"
+    except Exception:
+        pass
+    try:
+        response = await client.get(f"{root}/props", timeout=_TIMEOUT)
+        if response.status_code == 200:
+            props = response.json() or {}
+            if isinstance(props, dict) and (
+                "default_generation_settings" in props
+                or "total_slots" in props
+                or "chat_template" in props
+            ):
+                return "llamacpp"
+    except Exception:
+        pass
+    return None
 
 
 def _candidate_roots(url: str) -> list[str]:
@@ -71,7 +121,14 @@ async def clear_provider_cache(
     from src.model_context import is_local_endpoint
 
     if not enabled or not url or not is_local_endpoint(url):
-        return {"attempted": False, "local": False, "methods": [], "errors": []}
+        return {
+            "attempted": False,
+            "local": False,
+            "provider": "remote",
+            "methods": [],
+            "errors": [],
+            "isolation": "remote endpoint; stateless per request",
+        }
     origin = _origin(url) or url
     support = _support_cache.setdefault(origin, {})
     methods: list[str] = []
@@ -83,7 +140,42 @@ async def clear_provider_cache(
                 auth_headers[key] = headers[key]
 
     roots = _candidate_roots(url)
+    if origin in _lmstudio_origins:
+        return {
+            "attempted": True,
+            "local": True,
+            "provider": "lmstudio",
+            "methods": [],
+            "errors": [],
+            "isolation": "fresh session + cache_prompt=false (LM Studio has no reset endpoint)",
+        }
+
     async with httpx.AsyncClient() as client:
+        if not support.get("fingerprinted"):
+            support["fingerprinted"] = True
+            identified = ""
+            for root in roots:
+                found = await _probe_provider(client, root)
+                if found:
+                    identified = found
+                    break
+            if identified:
+                support[identified] = True
+                if identified == "lmstudio":
+                    _lmstudio_origins.add(origin)
+            if identified == "lmstudio":
+                return {
+                    "attempted": True,
+                    "local": True,
+                    "provider": "lmstudio",
+                    "methods": [],
+                    "errors": [],
+                    "isolation": "fresh session + cache_prompt=false (LM Studio has no reset endpoint)",
+                }
+            if identified != "llamacpp":
+                # Not llama.cpp: don't waste a /slots round on every origin.
+                support["llamacpp"] = False
+
         vllm_tasks = []
         for root in roots:
             if support.get("vllm", True):
@@ -134,9 +226,23 @@ async def clear_provider_cache(
             else:
                 support["llamacpp"] = False
 
+    provider = "unknown-local"
+    if methods:
+        provider = "vllm" if any(m.startswith("vllm") for m in methods) else "llamacpp"
+    elif support.get("llamacpp") or support.get("vllm"):
+        provider = "llamacpp" if support.get("llamacpp") else "vllm"
+    else:
+        provider = "generic-local"
+    isolation = (
+        "provider reset: " + ", ".join(methods)
+        if methods
+        else "fresh session + cache_prompt=false (no provider reset endpoint)"
+    )
     return {
         "attempted": True,
         "local": True,
+        "provider": provider,
         "methods": methods,
         "errors": errors,
+        "isolation": isolation,
     }
