@@ -1292,6 +1292,18 @@ const _sargeBadgeIcon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="n
       e.stopPropagation();
       _chatAboutResearch(job.id, e.currentTarget);
     });
+    card.querySelector('[data-action="sarge"]')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      try {
+        import('../sarge/index.js').then((mod) => {
+          if (mod?.createFromResearch) mod.createFromResearch(job.id, job.query);
+        }).catch(() => {
+          window.sargeModule?.createFromResearch?.(job.id, job.query);
+        });
+      } catch (_) {
+        window.sargeModule?.createFromResearch?.(job.id, job.query);
+      }
+    });
     card.querySelector('[data-menu-action="delete"]').addEventListener('click', async (e) => {
       e.stopPropagation();
       if (window.styledConfirm) {
